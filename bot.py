@@ -318,13 +318,27 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "bug": "🐛 *Bug Report*\n\nDescribe the issue:\n• What happened?\n• What did you expect?\n• Your device?",
             "idea": "💡 *Feature Idea*\n\nWhat would make FleetIQ better for you?",
             "question": "❓ *Question*\n\nWhat would you like to know about FleetIQ?",
-            "rate": "⭐ Please use /rate command to rate the app.",
+            "rate": "⭐ *Rate FleetIQ*\n\nHow would you rate the app?",
             "howto": "📖 Ask me anything about how to use FleetIQ!\n\nFor example:\n• How do I add a load?\n• How does sync work?\n• How to export PDF report?",
         }
         await query.edit_message_text(
             prompts.get(mode, "Go ahead, I'm listening!"),
             parse_mode="Markdown"
         )
+        if mode == "rate":
+            await ctx.bot.send_message(
+                chat_id=user.id,
+                text="Tap a number to rate:",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("⭐1", callback_data="rate_1"),
+                        InlineKeyboardButton("⭐2", callback_data="rate_2"),
+                        InlineKeyboardButton("⭐3", callback_data="rate_3"),
+                        InlineKeyboardButton("⭐4", callback_data="rate_4"),
+                        InlineKeyboardButton("⭐5", callback_data="rate_5"),
+                    ]
+                ])
+            )
 
     elif data.startswith("rate_"):
         stars = int(data.replace("rate_", ""))
