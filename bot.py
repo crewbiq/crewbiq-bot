@@ -86,7 +86,7 @@ async def ask_claude(messages: list, system: str = SYSTEM_PROMPT) -> str:
                     "content-type": "application/json",
                 },
                 json={
-                    "model": "claude-sonnet-4-20250514",
+                    "model": "claude-sonnet-4-5",
                     "max_tokens": 1000,
                     "system": system,
                     "messages": messages,
@@ -130,7 +130,7 @@ Respond ONLY with valid JSON, no markdown, no explanation:
                     "content-type": "application/json",
                 },
                 json={
-                    "model": "claude-sonnet-4-20250514",
+                    "model": "claude-sonnet-4-5",
                     "max_tokens": 500,
                     "messages": [{"role": "user", "content": prompt}],
                 }
