@@ -22,6 +22,7 @@ from urllib.parse import quote
 from typing import Optional
 
 import httpx
+from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction
 from telegram.ext import (
@@ -30,6 +31,8 @@ from telegram.ext import (
 )
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
+
+load_dotenv()
 
 BOT_TOKEN      = os.environ.get("BOT_TOKEN", "")
 ANTHROPIC_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -235,27 +238,69 @@ async def post_event_to_orchestrator(payload: dict) -> dict:
         return {"ok": False, "skipped": True, "reason": "ORCHESTRATOR_URL not configured"}
 
     url = ORCHESTRATOR_URL.rstrip("/") + "/v1/events"
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json=payload)
-        ok = resp.status_code < 400
-        if ok:
-            log.info("[Orchestrator] event forwarded: %s", payload.get("record_id"))
-        else:
-            log.warning(
-                "[Orchestrator] forward failed status=%s record_id=%s body=%s",
+    record_id = payload.get("record_id")
+    max_attempts = 3
+    backoff_seconds = 1.0
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(url, json=payload)
+
+            if resp.status_code < 400:
+                log.info(
+                    "event=orchestrator_forward_success record_id=%s status_code=%s attempt=%s",
+                    record_id,
+                    resp.status_code,
+                    attempt,
+                )
+                return {"ok": True, "status_code": resp.status_code, "attempts": attempt}
+
+            error_text = redact_secrets(resp.text[:300])
+            if attempt < max_attempts:
+                log.warning(
+                    "event=orchestrator_forward_retry record_id=%s attempt=%s status_code=%s backoff_seconds=%s body=%s",
+                    record_id,
+                    attempt,
+                    resp.status_code,
+                    backoff_seconds,
+                    error_text,
+                )
+                await asyncio.sleep(backoff_seconds)
+                backoff_seconds *= 2
+                continue
+
+            log.error(
+                "event=orchestrator_forward_final_failure record_id=%s attempts=%s status_code=%s body=%s",
+                record_id,
+                attempt,
                 resp.status_code,
-                payload.get("record_id"),
-                redact_secrets(resp.text[:300]),
+                error_text,
             )
-        return {"ok": ok, "status_code": resp.status_code}
-    except Exception as e:
-        log.warning(
-            "[Orchestrator] forward error record_id=%s: %s",
-            payload.get("record_id"),
-            redact_secrets(str(e)),
-        )
-        return {"ok": False, "error": "orchestrator_forward_error"}
+            return {"ok": False, "status_code": resp.status_code, "attempts": attempt}
+        except Exception as e:
+            error_text = redact_secrets(str(e))
+            if attempt < max_attempts:
+                log.warning(
+                    "event=orchestrator_forward_retry record_id=%s attempt=%s backoff_seconds=%s error=%s",
+                    record_id,
+                    attempt,
+                    backoff_seconds,
+                    error_text,
+                )
+                await asyncio.sleep(backoff_seconds)
+                backoff_seconds *= 2
+                continue
+
+            log.error(
+                "event=orchestrator_forward_final_failure record_id=%s attempts=%s error=%s",
+                record_id,
+                attempt,
+                error_text,
+            )
+            return {"ok": False, "error": "orchestrator_forward_error", "attempts": attempt}
+
+    return {"ok": False, "error": "orchestrator_forward_error", "attempts": max_attempts}
 
 
 def forward_event_to_orchestrator(payload: dict) -> None:
