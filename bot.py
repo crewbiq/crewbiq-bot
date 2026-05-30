@@ -1,5 +1,5 @@
 """
-CrewBIQ Support Bot v1.1.1
+CrewBIQ Support Bot v1.1.2
 CrewBIQ LLC
 
 Telegram support/community bot for CrewBIQ Driver.
@@ -42,7 +42,7 @@ ORCHESTRATOR_SECRET = os.environ.get("CREWBIQ_ORCHESTRATOR_SECRET", "")
 APP_SYNC_URL   = os.environ.get("APP_SYNC_URL", "")  # CrewBIQ Driver App_Sync Web App URL
 SHEETS_SECRET  = os.environ.get("COMMUNITY_API_SECRET", "")
 OWNER_ID       = int(os.environ.get("OWNER_ID", "7563117271"))
-APP_VERSION    = os.environ.get("APP_VERSION", "1.1.1")
+APP_VERSION    = os.environ.get("APP_VERSION", "1.1.2")
 
 BOT_USERNAME   = os.environ.get("BOT_USERNAME", "CrewBIQSupport_bot")
 COMMUNITY_URL  = os.environ.get("COMMUNITY_URL", "https://t.me/+ktZOiC7_bMowZmEx")
@@ -74,6 +74,10 @@ CrewBIQ Driver is a PWA (Progressive Web App) for truck drivers and owner-operat
 - Google Sheets sync for fleet managers
 - Dispute tracking for cancelled/adjusted loads
 - Pay calculation: CPM (cents per mile) or % of gross
+- Owner/Fleet tools for owner-operators with one or more trucks
+- Fleet and Drivers pages for trucks, driver profiles, and truck assignment
+- Fuel/DEF, Service, and weekly Deductions by truck
+- Home REAL NET and Fleet Dashboard profitability by truck/fleet
 - Community and support connection through Telegram
 
 Key facts:
@@ -81,6 +85,7 @@ Key facts:
 - Works offline (PWA with Service Worker)
 - Can be installed on phone from Chrome browser
 - Data syncs to Google Sheets via Apps Script URL
+- Orchestrator/Railway sync mirrors data into CrewBIQ backend/PostgreSQL
 - Free to use, no subscription
 - CrewBIQ Network is the Telegram support/community group
 - Users can report bugs, share ideas, ask questions, invite drivers, and optionally share anonymized data later
@@ -481,14 +486,14 @@ async def save_structured_feedback(
 
 # ── CLAUDE API ────────────────────────────────────────────────────────────────
 
-async def fetch_module_context(text: str) -> str:
+async def fetch_module_reference(text: str) -> dict:
     """
     Ask Orchestrator which module the text relates to and get support context.
-    Returns an enriched context string to inject into Claude's system prompt.
-    Falls back to "" silently so the bot always responds even if Orchestrator is down.
+    Returns module id/name/context to inject into Claude's system prompt.
+    Falls back silently so the bot always responds even if Orchestrator is down.
     """
     if not ORCHESTRATOR_URL:
-        return ""
+        return {}
     try:
         async with httpx.AsyncClient(timeout=3) as client:
             resp = await client.get(
@@ -497,10 +502,19 @@ async def fetch_module_context(text: str) -> str:
             )
             if resp.status_code == 200:
                 data = resp.json()
-                return data.get("context", "")
+                return {
+                    "module_id": data.get("module_id", ""),
+                    "module_name": data.get("module_name", ""),
+                    "context": data.get("context", ""),
+                }
     except Exception:
         pass
-    return ""
+    return {}
+
+
+async def fetch_module_context(text: str) -> str:
+    """Backward-compatible helper for older call sites."""
+    return (await fetch_module_reference(text)).get("context", "")
 
 
 async def ask_claude(messages: list, system: str = SYSTEM_PROMPT) -> str:
@@ -544,7 +558,7 @@ Respond ONLY with valid JSON, no markdown, no explanation:
 {{
   "type": "bug|idea|question|complaint|rating|feedback",
   "priority": "high|medium|low",
-  "module": "loads|pti|sync|reports|settings|disputes|install|community|referral|data_sharing|other",
+  "module": "driver_loads|owner_fleet|pti|sync|reports|settings|disputes|expenses|install|community|referral|data_sharing|other",
   "summary": "one line summary max 80 chars",
   "engineering_prompt": "Ready-to-use prompt for a developer AI. Be specific: what to fix/add, which file/module, what NOT to touch. Max 300 chars."
 }}"""
@@ -1337,11 +1351,18 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # Fetch module-specific context from Orchestrator and inject into system prompt.
     # Runs concurrently with the TYPING indicator — adds ~0ms to user-perceived latency.
-    module_ctx = await fetch_module_context(text)
-    system = (
-        SYSTEM_PROMPT + f"\n\n---\nModule reference for this message:\n{module_ctx}"
-        if module_ctx else SYSTEM_PROMPT
-    )
+    module_ref = await fetch_module_reference(text)
+    module_ctx = module_ref.get("context", "")
+    if module_ctx:
+        system = (
+            SYSTEM_PROMPT
+            + "\n\n---\n"
+            + "Current CrewBIQ module reference for this message. Treat this as the source of truth for current app features and exact UI names.\n"
+            + f"Detected module: {module_ref.get('module_id') or 'unknown'} ({module_ref.get('module_name') or 'unknown'})\n"
+            + module_ctx
+        )
+    else:
+        system = SYSTEM_PROMPT
 
     response = await ask_claude(session["history"], system=system)
     session["history"].append({"role": "assistant", "content": response})
@@ -1450,7 +1471,7 @@ def main():
     else:
         log.warning("JobQueue is not available. Install python-telegram-bot[job-queue] if daily summary is needed.")
 
-    log.info("CrewBIQ Support Bot v1.1.1 starting...")
+    log.info("CrewBIQ Support Bot v1.1.2 starting...")
     app.run_polling(drop_pending_updates=True)
 
 
