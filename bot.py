@@ -78,6 +78,7 @@ CrewBIQ Driver is a PWA (Progressive Web App) for truck drivers and owner-operat
 - Fleet and Drivers pages for trucks, driver profiles, and truck assignment
 - Fuel/DEF, Service, and weekly Deductions by truck
 - Home REAL NET and Fleet Dashboard profitability by truck/fleet
+- Scan / Lazy Capture OCR for fuel receipts and service invoices without storing files
 - Community and support connection through Telegram
 
 Key facts:
